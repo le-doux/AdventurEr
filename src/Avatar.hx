@@ -13,6 +13,8 @@ class Avatar extends Visual {
 			terrainPos += velocity.x * dt;
 			terrainPos = Maths.clamp(terrainPos, 0, curTerrain.length); //terain length is slow right now, because it always goes through a loop
 
+			//trace(terrainPos);
+
 			//update world pos
 			var groundPos = curTerrain.worldPosFromTerrainPos(terrainPos);
 			pos = groundPos.subtract(new Vector(size.x * 0.5, size.y));

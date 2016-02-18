@@ -3,6 +3,7 @@ import luxe.Input;
 import luxe.Color;
 import luxe.Camera;
 import luxe.Vector;
+import luxe.utils.Maths;
 
 //file IO
 import sys.io.File;
@@ -14,8 +15,11 @@ using ColorExtender;
 
 /*
 	TODO:
+	- edge crash bug
+	- friction
+	- edge springy bump
+	- pull up / down
 	- get screen view constant stuff working
-	- add avatar back in
 	- need shared lib / classes
 	- need to share file IO stuff
 	- need to create a shared "level" class that wraps some things
@@ -33,6 +37,10 @@ class Main extends luxe.Game {
 
 	//player
 	var player : Avatar;
+
+	//camera
+	var cameraSpeedMult : Float = 2.0;
+	var cameraMaxDistAheadOfPlayer : Float = 200.0;
 
 	//screen ratio stuff
 	var wRatio = 16.0;
@@ -147,6 +155,11 @@ class Main extends luxe.Game {
     	else {
     		player.velocity.x = 0;
     	}
+
+    	//move camera
+    	Luxe.camera.pos.x += player.velocity.x * cameraSpeedMult * dt;
+    	var centerX = player.pos.x - 10 - (Luxe.screen.w/2);
+    	Luxe.camera.pos.x = Maths.clamp(Luxe.camera.pos.x, centerX - cameraMaxDistAheadOfPlayer, centerX + cameraMaxDistAheadOfPlayer);
     } //update
 
 
