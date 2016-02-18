@@ -15,10 +15,9 @@ using ColorExtender;
 
 /*
 	TODO:
-	- edge crash bug
-	- friction
-	- edge springy bump
+	- edge springy bump (for camera)
 	- pull up / down
+	- add back slope resistance
 	- get screen view constant stuff working
 	- need shared lib / classes
 	- need to share file IO stuff
@@ -34,6 +33,7 @@ class Main extends luxe.Game {
 
 	//input
 	var scrollInput : ScrollInputHandler;
+	var maxScrollSpeed = 1200;
 
 	//player
 	var player : Avatar;
@@ -147,13 +147,21 @@ class Main extends luxe.Game {
 		}
 	}
 
+	override function onmouseup(e:MouseEvent) {
+		if (Math.abs(scrollInput.releaseVelocity.x) > 0) {
+			var scrollSpeed = Maths.clamp(scrollInput.releaseVelocity.x, -maxScrollSpeed, maxScrollSpeed);
+			player.coast(scrollSpeed, 0.75); //on release, coast for 3/4 of a second
+		}
+	}
+
     override function update(dt:Float) {
     	//connect input to player
     	if (Luxe.input.mousedown(1)) {
-    		player.velocity.x = scrollInput.touchDelta.x / dt;
+    		//player.velocity.x = scrollInput.touchDelta.x / dt;
+    		player.changeVelocity(scrollInput.touchDelta.x / dt); //force velocity to match scrolling
     	}
     	else {
-    		player.velocity.x = 0;
+    		//player.velocity.x = 0;
     	}
 
     	//move camera
