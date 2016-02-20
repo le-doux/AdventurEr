@@ -8,14 +8,20 @@ class Avatar extends Visual {
 	public var terrainPos : Float = 0;
 	public var velocity : Vector = new Vector(0,0);
 	private var isCoasting = false;
+	public var blocked = {
+		left : false,
+		right : false
+	};
 
 	override function update(dt:Float) {
 		if (curTerrain != null) {
 			//update terrain pos
 			terrainPos += velocity.x * dt;
-			terrainPos = Maths.clamp(terrainPos, 0, curTerrain.length); //terain length is slow right now, because it always goes through a loop
 
-			//trace(terrainPos);
+			//keep player in bounds
+			blocked.left = terrainPos <= 0;
+			blocked.right = terrainPos >= curTerrain.length;
+			terrainPos = Maths.clamp(terrainPos, 0, curTerrain.length); //terain length is slow right now, because it always goes through a loop
 
 			//update world pos
 			var groundPos = curTerrain.worldPosFromTerrainPos(terrainPos);
@@ -36,5 +42,9 @@ class Avatar extends Visual {
 			Actuate.stop(velocity); //stop "animating" the velocity
 		}
 		velocity.x = velocityX;
+	}
+
+	public function movingBlockedDirection() : Bool {
+		return (blocked.left && velocity.x <= 0) || (blocked.right && velocity.x >= 0);
 	}
 }

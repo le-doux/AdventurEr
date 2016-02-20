@@ -47,15 +47,16 @@ class Terrain {
 	function get_length() : Float {
 
 		//assume straight path from left to right (much faster, just uses x length)
-		//return lengthToPoint(points.length-1);
+		return lengthToPoint(points.length-1);
 
+		/*
 		//OLDER VERSION (makes no assumptions)
 		var l = 0.0;
 		for (i in 1 ... points.length) {
 			l += points[i-1].distance(points[i]); //TODO: replace with just x length?
 		}
 		return l;
-		
+		*/	
 	}
 
 	public function toJson() : Array<Dynamic> {
