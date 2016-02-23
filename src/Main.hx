@@ -16,6 +16,7 @@ using ColorExtender;
 /*
 	TODO:
 	- BUG: why is player so jittery???
+	- BUG: where sometimes player never stops moving!!!
 	- edge springy bump (for camera)
 	- add back slope resistance
 	- pull up / down
@@ -85,6 +86,39 @@ class Main extends luxe.Game {
 		Luxe.camera.size = new Vector(widthInWorldPixels, heightInWorldPixels);
 		trace(Luxe.camera.size_mode);
 		*/
+
+		//hack to auto open test file
+			var path = "/Users/adamrossledoux/Code/Haxe/AdventurEd/assets/leveltest4";
+			var fileStr = File.getContent(path);
+			var json = Json.parse(fileStr);
+
+			//rehydrate colors
+			var backgroundColor = (new Color()).fromJson(json.backgroundColor);
+			var terrainColor = (new Color()).fromJson(json.terrainColor);
+			var sceneryColor = (new Color()).fromJson(json.sceneryColor);
+			Luxe.renderer.clear_color = backgroundColor;
+
+			//rehydrate terrain
+			if (curTerrain != null) curTerrain.clear();
+			curTerrain = new Terrain();
+			curTerrain.fromJson(json.terrain);
+			curTerrain.draw(terrainColor);
+
+			//rehydrate scenery
+			for (s in scenery) {
+				s.destroy();
+			}
+			scenery = [];
+			for (s in cast(json.scenery, Array<Dynamic>)) {
+				var p = new Polystroke({color : sceneryColor, batcher : Luxe.renderer.batcher}, []);
+				p.fromJson(s);
+				scenery.push(p); //feels hacky
+			}
+
+			Luxe.camera.pos.x = curTerrain.points[0].x;
+
+			player.curTerrain = curTerrain;
+		//hack to auto open test file
 	} //ready
 
 	override function onkeyup( e:KeyEvent ) {
@@ -170,67 +204,63 @@ class Main extends luxe.Game {
 			player.changeVelocity(scrollInput.touchDelta.x / dt); //force velocity to match scrolling
 		}
 
+		cameraLogic(dt);
 
-		//cases
-		/*
-			- not moving
-			- moving: player isn't blocked & camera isn't blocked
-			- moving: player isn't blocked, but camera is
-			- moving: player is blocked, but camera is moving in opposite direction
-			- pushing spring: player is blocked, and camera is moving in that direction
-			- moving away from spring: player is blocked, but camera is moving in opposite direction
-			- springing back: camera is overextended & the player isn't touching the screen
-		*/
-
-		/*
-		//move camera offset
-		var camDist = player.velocity.x * camera.speedMult * dt;
-		var camStartOffsetX = camera.offsetX;
-		camera.offsetX += camDist;
-
-		//lock camera if player isn't blocked
-		if (!player.blocked.left) {
-			camera.offsetX = Math.max(camera.offsetX, -camera.maxDistAheadOfPlayer);
-		}
-		if (!player.blocked.right) {
-			camera.offsetX = Math.min(camera.offsetX, camera.maxDistAheadOfPlayer);
-		}
-
-		//if player IS blocked, & the camera is moving in that direction, you can push the offset further
-		if (player.movingBlockedDirection()) {
-			var camDistRemainder = camDist - (camera.offsetX - camStartOffsetX);
-
-			var distPastEdge = Math.max(0, Math.abs(Luxe.camera.pos.x - centerX) - camera.maxDistAheadOfPlayer);
-			var resistanceFactor = Math.max(0, 1 - Math.pow(distPastEdge / camera.edgeSpring.maxDist, 2));
-
-			camera.offsetX += camDistRemainder * resistanceFactor;
-		}
-
-		//if there is a spring offset & the player's finger is off, spring back
-
-		var centerX = player.pos.x - 10 - (Luxe.screen.w/2);
-		*/
-
-		var centerX = player.pos.x - 10 - (Luxe.screen.w/2);
-		//need function like player.movingBlockedDirection()
-		if (player.blocked.left && player.velocity.x <= 0) { //blocked left
-			var distPastEdge = Math.max(0, Math.abs(Luxe.camera.pos.x - centerX) - camera.maxDistAheadOfPlayer);
-			var resistanceFactor = Math.max(0, 1 - Math.pow(distPastEdge / camera.edgeSpring.maxDist, 2));
-			Luxe.camera.pos.x += player.velocity.x * camera.speedMult * resistanceFactor * dt;
-		}
-		else if (player.blocked.right && player.velocity.x >= 0) { //blocked right
-			var distPastEdge = Math.max(0, Math.abs(Luxe.camera.pos.x - centerX) - camera.maxDistAheadOfPlayer);
-			var resistanceFactor = Math.max(0, 1 - Math.pow(distPastEdge / camera.edgeSpring.maxDist, 2));
-			Luxe.camera.pos.x += player.velocity.x * camera.speedMult * resistanceFactor * dt;
-		}
-		else { //default
-			Luxe.camera.pos.x += player.velocity.x * camera.speedMult * dt;
-			var centerX = player.pos.x - 10 - (Luxe.screen.w/2);
-			Luxe.camera.pos.x = Maths.clamp(Luxe.camera.pos.x, centerX - camera.maxDistAheadOfPlayer, centerX + camera.maxDistAheadOfPlayer);
-		}
-
-		//TODO spring camera back!
 	} //update
+
+	function cameraLogic(dt : Float) {
+		//CAMERA LOGIC
+		//calc camera distance this frame
+		//var directionOfMovement = player.velocity.x / Math.abs(player.velocity.x);
+		var cameraDistance = player.velocity.x * camera.speedMult * dt;
+
+		//find bounds of normal camera movement
+		var leftDistMax = Math.min(0, -camera.maxDistAheadOfPlayer - camera.offsetX);
+		var rightDistMax = Math.max(0, camera.maxDistAheadOfPlayer - camera.offsetX);
+		var cameraDistanceInBounds = Maths.clamp(cameraDistance, leftDistMax, rightDistMax);
+		var cameraDistancePastBounds = cameraDistance - cameraDistanceInBounds;
+
+		//update camera base offset
+		camera.offsetX += cameraDistanceInBounds;
+
+		//move camera past the edge if the player is blocked
+		if (player.movingBlockedDirection() && Math.abs(cameraDistancePastBounds) > 0) {
+			var distancePastEdge = Math.max(0, Math.abs(camera.offsetX) - camera.maxDistAheadOfPlayer);
+			//var resistanceFactor = Math.max(0, 1 - Math.pow(distancePastEdge / camera.edgeSpring.maxDist, 2));
+			//var resistanceFactor = 1 - (distancePastEdge / camera.edgeSpring.maxDist);
+			var resistanceFactor = Math.max(0, 1 - Math.sqrt(distancePastEdge / camera.edgeSpring.maxDist));
+			cameraDistancePastBounds *= resistanceFactor;
+			
+			camera.offsetX += cameraDistancePastBounds;
+			var maxTotalOffset = camera.maxDistAheadOfPlayer + camera.edgeSpring.maxDist;
+			camera.offsetX = Maths.clamp(camera.offsetX, -maxTotalOffset, maxTotalOffset);
+		}
+
+		//use spring to keep camera in its proper bounds
+		if (!Luxe.input.mousedown(1) && Math.abs(camera.offsetX) > camera.maxDistAheadOfPlayer) {
+			var dir = camera.offsetX > 0 ? 1 : -1;
+			var dif = Math.abs(camera.offsetX) - camera.maxDistAheadOfPlayer;
+			var springForce = dif * camera.edgeSpring.springConstant;
+
+			camera.edgeSpring.velocityX += -dir * springForce * dt;
+			camera.offsetX += camera.edgeSpring.velocityX * dt;
+
+			//stop using spring when it brings you back from the edge
+			if (Math.abs(camera.offsetX) < camera.maxDistAheadOfPlayer) {
+				camera.offsetX = dir * camera.maxDistAheadOfPlayer; //put camera at resting place
+				camera.edgeSpring.velocityX = 0; //stop sprint motion
+				player.changeVelocity(0); //stop player from moving
+			}
+		}
+		else {
+			camera.edgeSpring.velocityX = 0; //edge case protection
+		}
+
+		//keep camera attached to player
+		var centerX = player.pos.x - 10 - (Luxe.screen.w/2);
+		Luxe.camera.pos.x = centerX + camera.offsetX;
+		Luxe.camera.pos.y = (player.pos.y + 60) - (Luxe.screen.height * 0.66);
+	}
 
 
 } //Main
