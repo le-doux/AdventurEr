@@ -4,12 +4,15 @@ import luxe.Color;
 import luxe.Camera;
 import luxe.Vector;
 import luxe.utils.Maths;
+import luxe.resource.Resource.JSONResource;
 
+/*
 //file IO
 import sys.io.File;
 import sys.io.FileOutput;
 import sys.io.FileInput;
 import haxe.Json;
+*/
 
 using ColorExtender;
 
@@ -17,7 +20,7 @@ using ColorExtender;
 	TODO:
 	- BUG: why is player so jittery???
 	- BUG: where sometimes player never stops moving!!!
-	- edge springy bump (for camera)
+	- tune camera variables
 	- add back slope resistance
 	- pull up / down
 	- get screen view constant stuff working
@@ -33,6 +36,7 @@ class Main extends luxe.Game {
 	//level
 	var curTerrain : Terrain;
 	var scenery : Array<Polystroke> = [];
+	var actionButtons : Array<ActionButton> = [];
 
 	//input
 	var scrollInput : ScrollInputHandler;
@@ -75,6 +79,52 @@ class Main extends luxe.Game {
 		heightInWorldPixels = widthInWorldPixels * widthToHeight;
 		zoomForCorrectWidth = Luxe.screen.width / widthInWorldPixels;
 
+		var load = Luxe.resources.load_json('assets/leveltest7');
+		load.then(function(jsonRes : JSONResource) {
+
+			var json = jsonRes.asset.json;
+
+			//rehydrate colors
+			var backgroundColor = (new Color()).fromJson(json.backgroundColor);
+			var terrainColor = (new Color()).fromJson(json.terrainColor);
+			var sceneryColor = (new Color()).fromJson(json.sceneryColor);
+			Luxe.renderer.clear_color = backgroundColor;
+
+			//rehydrate terrain
+			if (curTerrain != null) curTerrain.clear();
+			curTerrain = new Terrain();
+			curTerrain.fromJson(json.terrain);
+			curTerrain.draw(terrainColor);
+
+			//rehydrate scenery
+			for (s in scenery) {
+				s.destroy();
+			}
+			scenery = [];
+			for (s in cast(json.scenery, Array<Dynamic>)) {
+				var p = new Polystroke({color : sceneryColor, batcher : Luxe.renderer.batcher}, []);
+				p.fromJson(s);
+				scenery.push(p); //feels hacky
+			}
+
+			//rehydrate action buttons
+			for (b in actionButtons) {
+				b.clear();
+			}
+			actionButtons = [];
+			for (b in cast(json.buttons, Array<Dynamic>)) {
+				trace(b);
+				var a = (new ActionButton()).fromJson(b);
+				a.terrain = curTerrain;
+				a.curSize = 0; //start invisible
+				actionButtons.push(a);
+			}
+
+			Luxe.camera.pos.x = curTerrain.points[0].x;
+
+			player.curTerrain = curTerrain;
+		});
+
 		/*
 		trace(widthInWorldPixels + " x " + heightInWorldPixels);
 		trace(Luxe.screen.width);
@@ -87,8 +137,9 @@ class Main extends luxe.Game {
 		trace(Luxe.camera.size_mode);
 		*/
 
+		/*
 		//hack to auto open test file
-			var path = "/Users/adamrossledoux/Code/Haxe/AdventurEd/assets/leveltest4";
+			var path = "/Users/adamrossledoux/Code/Haxe/AdventurEd/assets/leveltest7";
 			var fileStr = File.getContent(path);
 			var json = Json.parse(fileStr);
 
@@ -115,10 +166,24 @@ class Main extends luxe.Game {
 				scenery.push(p); //feels hacky
 			}
 
+			//rehydrate action buttons
+			for (b in actionButtons) {
+				b.clear();
+			}
+			actionButtons = [];
+			for (b in cast(json.buttons, Array<Dynamic>)) {
+				trace(b);
+				var a = (new ActionButton()).fromJson(b);
+				a.terrain = curTerrain;
+				a.curSize = 0; //start invisible
+				actionButtons.push(a);
+			}
+
 			Luxe.camera.pos.x = curTerrain.points[0].x;
 
 			player.curTerrain = curTerrain;
 		//hack to auto open test file
+		*/
 	} //ready
 
 	override function onkeyup( e:KeyEvent ) {
@@ -157,6 +222,7 @@ class Main extends luxe.Game {
 	override function onkeydown( e:KeyEvent ) {
 
 		//open file [THIS NEEDS TO BE SHARED]
+		/*
 		if (e.keycode == Key.key_o && e.mod.meta ) {
 			var path = Luxe.core.app.io.module.dialog_open();
 			var fileStr = File.getContent(path);
@@ -189,6 +255,15 @@ class Main extends luxe.Game {
 
 			player.curTerrain = curTerrain;
 		}
+		*/
+	}
+
+	override function onmousedown(e:MouseEvent) {
+		player.changeVelocity(0); //just in case to stop weird always scrolling bug (is this really the problem?)
+
+		for (b in actionButtons) {
+			b.triggerTouch(Luxe.camera.screen_point_to_world(e.pos));
+		}
 	}
 
 	override function onmouseup(e:MouseEvent) {
@@ -196,12 +271,26 @@ class Main extends luxe.Game {
 			var scrollSpeed = Maths.clamp(scrollInput.releaseVelocity.x, -maxScrollSpeed, maxScrollSpeed);
 			player.coast(scrollSpeed, 0.75); //on release, coast for 3/4 of a second
 		}
+		else {
+			player.changeVelocity(0); //just in case to stop weird always scrolling bug (is this really the problem?)
+		}
 	}
 
 	override function update(dt:Float) {
 		//connect input to player
 		if (Luxe.input.mousedown(1)) {
 			player.changeVelocity(scrollInput.touchDelta.x / dt); //force velocity to match scrolling
+		}
+
+		//draw action buttons
+		for (a in actionButtons) {
+			a.drawImmediate();
+			if (Math.abs(a.terrainPos - player.terrainPos) < 300) { //arbitrary distance
+				a.triggerAppear();
+			}
+			else {
+				a.triggerDisappear();
+			}
 		}
 
 		cameraLogic(dt);
