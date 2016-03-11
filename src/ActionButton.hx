@@ -1,11 +1,13 @@
 import luxe.Color;
 import luxe.Vector;
+import luxe.Entity;
 import phoenix.geometry.*;
 import luxe.tween.Actuate;
 import luxe.tween.actuators.GenericActuator.IGenericActuator;
-
+import luxe.tween.actuators.GenericActuator;
+import luxe.Visual;
 using ColorExtender;
-using VectorExtender;
+using PolylineExtender;
 
 enum Direction {
 	Left;
@@ -20,88 +22,193 @@ enum OutroAnimation {
 	Emphasize;
 }
 
-class ActionButton {
+//maybe this should all be a "Visual" class
+class ActionButton extends Visual {
+
+	////
+	public var startSize : Float;
+	public var endSize : Float;
+	public var curSize (default, set) : Float;
+
+	private var editFrame = 0;
+	private var isEditing = false;
+
+	public var pullDir (default, set) : Direction;
+	public var outro : OutroAnimation;
+
+	public var illustrations : Array<Array<Polystroke>> = [[],[]];
+	/////
+
+	///
+	private var pullTab : Visual;
+	var isAppeared = false; //hack
+	//
+
 	//saveable data (extract into its own struct-like object?)
 	var backgroundColor : Color;
-	var illustrationColor : Color;
+	public var illustrationColor : Color;
 	public var terrainPos : Float;
 	public var height : Float;
-	public var startSize : Float;
-	public var endSizeMult : Float;
-	public var pullDir : Direction;
-	public var outro : OutroAnimation;
 
 	public var terrain : Terrain;
 	var geo : Array<Geometry> = [];
 
-	public var curSize : Float;
+	public var stateController = 1; //needs a better name
+
 	public var curState = 0; //0 - start, 1 - end
 
-	public var isVisible = false;
-	public var isActivated = false;
+	public var curIllustrationIndex = 0;
+	public var curIllustration /*(get, null)*/ : Array<Polystroke>;
 
-	public function new() {
+	public override function new(_options : luxe.options.VisualOptions) {
+		super(_options);
+		geometry = Luxe.draw.circle({
+			x : 0, y : 0,
+			r : 100, //arbitrary
+			batcher : _options.batcher
+		});
 
+		var ring = new Visual({
+			geometry: Luxe.draw.ring({
+							x : 0, y : 0,
+							r : 102, //arbitrary,
+							color : new Color(1,1,1), //temporary
+							batcher : _options.batcher
+						}),
+			parent: this
+		});
+
+		pullTab = new Visual({no_geometry:true, parent:this});
+		new Visual({
+			geometry: Luxe.draw.line({
+					p0 : new Vector(-10,110),
+					p1 : new Vector(0,120),
+					color : new Color(1,1,1), //temporary,
+					batcher : _options.batcher
+				}),
+			parent: pullTab
+		});
+		new Visual({
+			geometry: Luxe.draw.line({
+					p0 : new Vector(10,110),
+					p1 : new Vector(0,120),
+					color : new Color(1,1,1), //temporary,
+					batcher : _options.batcher
+				}),
+			parent: pullTab
+		});
 	}
 
-	public function triggerTouch(pos : Vector) {
-		if (!isActivated) {
-			var worldPos = terrain.worldPosFromTerrainPos(terrainPos);
-			worldPos.y -= height;
-
-			/*
-			trace(worldPos);
-			trace(worldPos.distance(pos));
-			trace(curSize);
-			trace("---");
-			*/
-
-			if (worldPos.distance(pos) < curSize) {
-				isActivated = true;
-				animatePullSequence();
-			}
-		}
-	}
-
-	//hacky  as fuck
 	public function triggerAppear() {
-		if (!isVisible && !isActivated) {
-			isVisible = true;
+		if (!isAppeared) {
+			isAppeared = true;
 			animateAppear();
 		}
 	}
 
-	//as fuuuuuck
 	public function triggerDisappear() {
-		if (isVisible && !isActivated) {
-			isVisible = false;
-			animateDisappear2(); //wtf ok
+		if (isAppeared) {
+			isAppeared = false;
+			animateLeave();
 		}
 	}
 
+	//TODO make the illustration change as you pull!
+	public override function update(dt : Float) {
+
+		//inefficient to do this every loop?
+		if (curSize - startSize >= (endSize - startSize)/2 
+			&& illustrations[1].length > 0) {
+			for (s in illustrations[0]) {
+				s.set_visible(false);
+			}
+			for (s in illustrations[1]) {
+				s.set_visible(true);
+			}
+		}
+		else {
+			for (s in illustrations[0]) {
+				s.set_visible(true);
+			}
+			for (s in illustrations[1]) {
+				s.set_visible(false);
+			}
+		}
+
+		if (terrain != null) {
+			pos = terrain.worldPosFromTerrainPos(terrainPos);
+			pos.y -= height;
+		}
+	}
+
+	public function set_pullDir(d : Direction) : Direction {
+		pullDir = d;
+		switch pullDir {
+			case Direction.Left:
+				pullTab.rotation_z = 90;
+			case Direction.Right:
+				pullTab.rotation_z = 270;
+			case Direction.Up:
+				pullTab.rotation_z = 180;
+			case Direction.Down:
+				pullTab.rotation_z = 0;
+		}
+		return pullDir;
+	}
+
+	public function addStrokeToIllustration(p : Polystroke) {
+		//this works, but it feels like I should be using a transformation matrix or something
+		p.pos.subtract(this.pos).divideScalar(this.scale.x);
+		p.scale.divideScalar(this.scale.x);
+		p.color = illustrationColor;
+
+		p.parent = this;
+		illustrations[editFrame].push(p);
+	}
+
+	function set_curSize(size) : Float {
+		curSize = size;
+		scale = new Vector(curSize, curSize);
+
+		if (isEditing) {
+			if (editFrame == 0) startSize = curSize;
+			if (editFrame == 1) endSize = curSize;
+		}
+
+		return curSize;
+	}
+
+	public function editStart() {
+		editFrame = 0;
+		isEditing = true;
+		curSize = startSize;
+	}
+
+	public function editEnd() {
+		editFrame = 1;
+		isEditing = true;
+		curSize = endSize;
+	}
+
 	public function animateAppear() : IGenericActuator {
+		isEditing = false; //hack?
 		curSize = 0;
 		return Actuate.tween(this, 1.0, {curSize: startSize})
-					.ease(luxe.tween.easing.Bounce.easeOut)
-					.onComplete(function(){
-						updateCurSize();
-					});
+					.ease(luxe.tween.easing.Bounce.easeOut);
 	}
 
-	//for normal dismiss
-	function animateDisappear2() {
+	public function animateLeave() : IGenericActuator {
+		isEditing = false; //hack?
 		curSize = startSize;
 		return Actuate.tween(this, 1.0, {curSize: 0})
-				.ease(luxe.tween.easing.Quad.easeIn);
+					.ease(luxe.tween.easing.Quad.easeOut);
 	}
 
-	public function animatePull() {
+	public function animatePull() : IGenericActuator {
+		isEditing = false; //hack?
 		curSize = startSize;
-		return Actuate.tween(this, 3.0, {curSize: startSize*endSizeMult})
-					.ease(luxe.tween.easing.Quad.easeOut)
-					.onComplete(function(){
-						updateCurSize();
-					});
+		return Actuate.tween(this, 3.0, {curSize: endSize})
+					.ease(luxe.tween.easing.Quad.easeOut);
 	}
 
 	public function animateOutro() { //returning this will be tricky
@@ -115,21 +222,26 @@ class ActionButton {
 		}
 	}
 
-	function animateDisappear() {
-		curSize = startSize * endSizeMult;
+	function animateDisappear() : IGenericActuator {
+		isEditing = false; //hack?
+		curSize = endSize;
 		return Actuate.tween(this, 1.0, {curSize: 0})
 				.ease(luxe.tween.easing.Elastic.easeIn);
 	}
 
-	function animateFillScreen() {
-		curSize = startSize * endSizeMult;
+	function animateFillScreen() : IGenericActuator {
+		isEditing = false; //hack?
+		curSize = endSize;
 		return Actuate.tween(this, 1.0, {curSize: Luxe.screen.width})
 				.ease(luxe.tween.easing.Quad.easeIn);
 	}
 
-	function animateEmphasize() { //how to return? (we could use a callback)
-		curSize = startSize * endSizeMult;
-		Actuate.tween(this, 0.6, {curSize: startSize * (endSizeMult * 1.5)})
+	//TODO can't figure out how to return a two deep animation
+	function animateEmphasize() {
+		isEditing = false; //hack?
+		curSize = endSize;
+
+		Actuate.tween(this, 0.6, {curSize: (endSize * 1.5)})
 				.ease(luxe.tween.easing.Bounce.easeOut)
 				.onComplete(function() {
 					Actuate.tween(this, 0.2, {curSize: 0})
@@ -138,7 +250,7 @@ class ActionButton {
 				});
 	}
 
-	public function animateSequence() {
+	public function animateSequence() { //can't figure out how to return this
 		animateAppear()
 			.onComplete(function() {
 				animatePull()
@@ -148,233 +260,16 @@ class ActionButton {
 			});
 	}
 
-	//second half of the sequence
-	public function animatePullSequence() {
-		animatePull()
-			.onComplete(function(){
-					animateOutro();
-				});
-	}
-
-	public function showStart() {
-		curSize = startSize;
-		curState = 0;
-	}
-
-	public function showEnd() {
-		curSize = startSize * endSizeMult;
-		curState = 1;
-	}
-
-	public function updateCurSize() { //the worst kind of hack
-		if (curState == 0) curSize = startSize;
-		if (curState == 1) curSize = startSize * endSizeMult;
-	}
-
-	//do I need a dynamic draw too? (especially for the arrows)
-	public function draw() {
-		var worldPos = terrain.worldPosFromTerrainPos(terrainPos);
-		worldPos.y -= height; //height above the terrain
-		geo.push(
-			Luxe.draw.circle({
-				x : worldPos.x, y : worldPos.y,
-				r : startSize,
-				color : backgroundColor,
-				depth : 0
-			})
-		);
-
-		geo.push(
-			Luxe.draw.ring({
-				x : worldPos.x, y : worldPos.y,
-				r : startSize,
-				color : illustrationColor,
-				depth : 1
-			})
-		);
-
-		/*
-		//draw final size too
-		geo.push(
-			Luxe.draw.ring({
-				x : worldPos.x, y : worldPos.y,
-				r : startSize * endSizeMult,
-				color : illustrationColor,
-				depth : 1
-			})
-		);
-		*/
-
-		//this is a ridiculous switch statement (remove as soon as possible)
-		switch pullDir {
-			case Direction.Left:
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x - startSize - 30, worldPos.y),
-						p1 : new Vector(worldPos.x - startSize - 10, worldPos.y - 10),
-						color : illustrationColor
-					})
-				);
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x - startSize - 30, worldPos.y),
-						p1 : new Vector(worldPos.x - startSize - 10, worldPos.y + 10),
-						color : illustrationColor
-					})
-				);
-			case Direction.Right:
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x + startSize + 30, worldPos.y),
-						p1 : new Vector(worldPos.x + startSize + 10, worldPos.y - 10),
-						color : illustrationColor
-					})
-				);
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x + startSize + 30, worldPos.y),
-						p1 : new Vector(worldPos.x + startSize + 10, worldPos.y + 10),
-						color : illustrationColor
-					})
-				);
-			case Direction.Up:
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y - startSize - 10),
-						p1 : new Vector(worldPos.x - 10, worldPos.y - startSize - 30),
-						color : illustrationColor
-					})
-				);
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y - startSize - 10),
-						p1 : new Vector(worldPos.x + 10, worldPos.y - startSize - 30),
-						color : illustrationColor
-					})
-				);
-			case Direction.Down:
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y + startSize + 30),
-						p1 : new Vector(worldPos.x - 10, worldPos.y + startSize + 10),
-						color : illustrationColor
-					})
-				);
-				geo.push(
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y + startSize + 30),
-						p1 : new Vector(worldPos.x + 10, worldPos.y + startSize + 10),
-						color : illustrationColor
-					})
-				);
-		}
-	}
-
-	public function drawImmediate() {
-		var worldPos = new Vector(Luxe.screen.width/2, Luxe.screen.height/2); //ugly hack
-		if (terrain != null) { //even uglier hack?
-			worldPos = terrain.worldPosFromTerrainPos(terrainPos);
-			worldPos.y -= height; 
-		}
-
-		Luxe.draw.circle({
-			x : worldPos.x, y : worldPos.y,
-			r : curSize,
-			color : backgroundColor,
-			depth : 0,
-			immediate : true
-		});
-
-		Luxe.draw.ring({
-			x : worldPos.x, y : worldPos.y,
-			r : curSize,
-			color : illustrationColor,
-			depth : 1,
-			immediate : true
-		});
-
-		if (curSize >= startSize) {
-			//this is a ridiculous switch statement (remove as soon as possible)
-			switch pullDir {
-				case Direction.Left:
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x - curSize - 30, worldPos.y),
-						p1 : new Vector(worldPos.x - curSize - 10, worldPos.y - 10),
-						color : illustrationColor,
-						immediate : true
-					});
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x - curSize - 30, worldPos.y),
-						p1 : new Vector(worldPos.x - curSize - 10, worldPos.y + 10),
-						color : illustrationColor,
-						immediate : true
-					});
-				case Direction.Right:
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x + curSize + 30, worldPos.y),
-						p1 : new Vector(worldPos.x + curSize + 10, worldPos.y - 10),
-						color : illustrationColor,
-						immediate : true
-					});
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x + curSize + 30, worldPos.y),
-						p1 : new Vector(worldPos.x + curSize + 10, worldPos.y + 10),
-						color : illustrationColor,
-						immediate : true
-					});
-				case Direction.Up:
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y - curSize - 30),
-						p1 : new Vector(worldPos.x - 10, worldPos.y - curSize - 10),
-						color : illustrationColor,
-						immediate : true
-					});
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y - curSize - 30),
-						p1 : new Vector(worldPos.x + 10, worldPos.y - curSize - 10),
-						color : illustrationColor,
-						immediate : true
-					});
-				case Direction.Down:
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y + curSize + 30),
-						p1 : new Vector(worldPos.x - 10, worldPos.y + curSize + 10),
-						color : illustrationColor,
-						immediate : true
-					});
-					Luxe.draw.line({
-						p0 : new Vector(worldPos.x, worldPos.y + curSize + 30),
-						p1 : new Vector(worldPos.x + 10, worldPos.y + curSize + 10),
-						color : illustrationColor,
-						immediate : true
-					});
-			}
-		}
-
-	}
-
-	public function clear() {
-		//Luxe.renderer.batcher.remove(circle);
-		for (g in geo) {
-			Luxe.renderer.batcher.remove(g);
-		}
-	}
-
-	//immediate mode drawing
-	public function drawUI() {
-		var worldPos = terrain.worldPosFromTerrainPos(terrainPos);
-		worldPos.y -= height; //height above the terrain
-
-		Luxe.draw.ring({
-			x : worldPos.x, y : worldPos.y,
-			r : startSize * endSizeMult,
-			color : illustrationColor,
-			depth : 1,
-			immediate : true
-		});
-	}
-
 	public function toJson() {
+		var illustration1 = [];
+		for (p in illustrations[0]) {
+			illustration1.push(p.toJson());
+		}
+		var illustration2 = [];
+		for (p in illustrations[1]) {
+			illustration2.push(p.toJson());
+		}
+
 		return {
 			type : "action",
 			backgroundColor : backgroundColor.toJson(),
@@ -382,9 +277,11 @@ class ActionButton {
 			terrainPos : terrainPos,
 			height : height,
 			startSize : startSize,
-			endSizeMult : endSizeMult,
+			endSize : endSize,
 			pullDir : pullDir.getName(),
-			outro : outro.getName()
+			outro : outro.getName(),
+			illustration1: illustration1,
+			illustration2: illustration2
 		};
 	}
 
@@ -394,11 +291,45 @@ class ActionButton {
 		terrainPos = json.terrainPos;
 		height = json.height;
 		startSize = json.startSize;
-		endSizeMult = json.endSizeMult;
+		endSize = json.endSize;
 		pullDir = Direction.createByName(json.pullDir);
 		outro = OutroAnimation.createByName(json.outro);
 
+		for (j in cast(json.illustration1, Array<Dynamic>)) {
+			var p = new Polystroke(
+							{
+								color:illustrationColor,
+								batcher:Luxe.renderer.batcher,
+								depth:50 //arbitrary
+							},
+						[]).fromJson(j);
+			p.parent = this;
+			illustrations[0].push(p);
+		}
+		for (j in cast(json.illustration2, Array<Dynamic>)) {
+			var p = new Polystroke(
+							{
+								color:illustrationColor,
+								batcher:Luxe.renderer.batcher,
+								depth:50 //arbitrary
+							},
+						[]).fromJson(j);
+			p.parent = this;
+			illustrations[1].push(p);
+		}
+		//switchIllustration(0);
+
 		curSize = startSize;
+
+		//test stuff
+		color = backgroundColor;
+		//color children (w/ plenty of hacks)
+		for (c in this.children) {
+			cast(c, Visual).color = illustrationColor;
+			for (c2 in c.children) {
+				cast(c2, Visual).color = illustrationColor;
+			}
+		};
 
 		return this;
 	}

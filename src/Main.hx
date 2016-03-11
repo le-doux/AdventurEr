@@ -79,7 +79,7 @@ class Main extends luxe.Game {
 		heightInWorldPixels = widthInWorldPixels * widthToHeight;
 		zoomForCorrectWidth = Luxe.screen.width / widthInWorldPixels;
 
-		var load = Luxe.resources.load_json('assets/leveltest7');
+		var load = Luxe.resources.load_json('assets/leveltest10');
 		load.then(function(jsonRes : JSONResource) {
 
 			var json = jsonRes.asset.json;
@@ -109,12 +109,14 @@ class Main extends luxe.Game {
 
 			//rehydrate action buttons
 			for (b in actionButtons) {
-				b.clear();
+				//b.clear();
+				Luxe.scene.remove(b);
+				b.destroy();
 			}
 			actionButtons = [];
 			for (b in cast(json.buttons, Array<Dynamic>)) {
 				trace(b);
-				var a = (new ActionButton()).fromJson(b);
+				var a = (new ActionButton({})).fromJson(b);
 				a.terrain = curTerrain;
 				a.curSize = 0; //start invisible
 				actionButtons.push(a);
@@ -261,9 +263,11 @@ class Main extends luxe.Game {
 	override function onmousedown(e:MouseEvent) {
 		player.changeVelocity(0); //just in case to stop weird always scrolling bug (is this really the problem?)
 
+		/*
 		for (b in actionButtons) {
 			b.triggerTouch(Luxe.camera.screen_point_to_world(e.pos));
 		}
+		*/
 	}
 
 	override function onmouseup(e:MouseEvent) {
@@ -284,7 +288,7 @@ class Main extends luxe.Game {
 
 		//draw action buttons
 		for (a in actionButtons) {
-			a.drawImmediate();
+			//a.drawImmediate();
 			if (Math.abs(a.terrainPos - player.terrainPos) < 300) { //arbitrary distance
 				a.triggerAppear();
 			}
