@@ -1,6 +1,7 @@
 import luxe.Color;
 import luxe.Vector;
 import luxe.Entity;
+import luxe.Input;
 import phoenix.geometry.*;
 import luxe.tween.Actuate;
 import luxe.tween.actuators.GenericActuator.IGenericActuator;
@@ -8,6 +9,7 @@ import luxe.tween.actuators.GenericActuator;
 import luxe.Visual;
 using ColorExtender;
 using PolylineExtender;
+using VectorExtender;
 
 enum Direction {
 	Left;
@@ -37,20 +39,31 @@ class ActionButton extends Visual {
 	public var outro : OutroAnimation;
 
 	public var illustrations : Array<Array<Polystroke>> = [[],[]];
+
+	public var onCompleteCallback : Dynamic = null;
+
+	public var terrainPos (default, set) : Float;
+	public var height (default, set) : Float;
+	public var terrain (default, set) : Terrain;
 	/////
+
+	///
+	public var isTouched = false;
+	public var touchStartPos : Vector;
+	public var isOutroed = false;
+	///
 
 	///
 	private var pullTab : Visual;
 	var isAppeared = false; //hack
 	//
 
+
+	///OLD STUFF (some still in use --- needs major cleanup)
 	//saveable data (extract into its own struct-like object?)
 	var backgroundColor : Color;
 	public var illustrationColor : Color;
-	public var terrainPos : Float;
-	public var height : Float;
 
-	public var terrain : Terrain;
 	var geo : Array<Geometry> = [];
 
 	public var stateController = 1; //needs a better name
@@ -59,6 +72,7 @@ class ActionButton extends Visual {
 
 	public var curIllustrationIndex = 0;
 	public var curIllustration /*(get, null)*/ : Array<Polystroke>;
+	///END OLD STUFF
 
 	public override function new(_options : luxe.options.VisualOptions) {
 		super(_options);
@@ -99,15 +113,61 @@ class ActionButton extends Visual {
 		});
 	}
 
+	public override function onmousedown(e:MouseEvent) {
+		var mouseWorldPos = Luxe.camera.screen_point_to_world(e.pos);
+		if (isAppeared && !isOutroed && mouseWorldPos.distance(pos) < (100 * curSize * 1.2)) {
+			isTouched = true;
+			touchStartPos = mouseWorldPos;
+		}
+	}
+
+	public override function onmousemove(e:MouseEvent) {
+		if (isTouched) {
+			var mouseWorldPos = Luxe.camera.screen_point_to_world(e.pos);
+			var pullDist : Float = 0;
+			switch pullDir {
+				case Direction.Left:
+					pullDist = touchStartPos.x - mouseWorldPos.x;
+				case Direction.Right:
+					pullDist = mouseWorldPos.x - touchStartPos.x;
+				case Direction.Up:
+					pullDist = touchStartPos.y - mouseWorldPos.y;
+				case Direction.Down:
+					pullDist = mouseWorldPos.y - touchStartPos.y;
+			}
+			pullDist = Math.max(0, pullDist);
+
+			var pullDelt = pullDist / 200;
+			var sizeDelt = endSize - startSize;
+			curSize = startSize + (sizeDelt * pullDelt);
+
+			if (pullDelt >= 1) {
+				isTouched = false;
+				isOutroed = true;
+				animateOutro();
+			}
+		}
+	}
+
+	public override function onmouseup(e:MouseEvent) {
+		if (isTouched) {	
+			isTouched = false;
+			if (!isOutroed) {
+				Actuate.tween(this, 0.3, {curSize: startSize})
+					.ease(luxe.tween.easing.Quad.easeOut);
+			}
+		}
+	}
+
 	public function triggerAppear() {
-		if (!isAppeared) {
+		if (!isAppeared && !isOutroed) {
 			isAppeared = true;
 			animateAppear();
 		}
 	}
 
 	public function triggerDisappear() {
-		if (isAppeared) {
+		if (isAppeared && !isOutroed) {
 			isAppeared = false;
 			animateLeave();
 		}
@@ -135,10 +195,40 @@ class ActionButton extends Visual {
 			}
 		}
 
+		//causes bugs by resetting pos all the damn time
+		/*
 		if (terrain != null) {
 			pos = terrain.worldPosFromTerrainPos(terrainPos);
 			pos.y -= height;
 		}
+		*/
+	}
+
+	public function set_height(h : Float) : Float {
+		height = h;
+		updatePos();
+		return height;
+	}
+
+	public function set_terrainPos(p : Float) : Float {
+		terrainPos = p;
+		updatePos();
+		return terrainPos;
+	}
+
+	public function set_terrain(t : Terrain) : Terrain {
+		terrain = t;
+		updatePos();
+		return terrain;
+	}
+
+	function updatePos() {
+		if (terrain != null) {
+			//update position with terrain
+			pos = terrain.worldPosFromTerrainPos(terrainPos);
+			pos.y -= height;	
+		}
+
 	}
 
 	public function set_pullDir(d : Direction) : Direction {
@@ -158,8 +248,8 @@ class ActionButton extends Visual {
 
 	public function addStrokeToIllustration(p : Polystroke) {
 		//this works, but it feels like I should be using a transformation matrix or something
-		p.pos.subtract(this.pos).divideScalar(this.scale.x);
-		p.scale.divideScalar(this.scale.x);
+		//p.pos.subtract(this.pos).divideScalar(this.scale.x);
+		//p.scale.divideScalar(this.scale.x);
 		p.color = illustrationColor;
 
 		p.parent = this;
@@ -222,18 +312,28 @@ class ActionButton extends Visual {
 		}
 	}
 
-	function animateDisappear() : IGenericActuator {
+	function animateDisappear() {
 		isEditing = false; //hack?
 		curSize = endSize;
-		return Actuate.tween(this, 1.0, {curSize: 0})
-				.ease(luxe.tween.easing.Elastic.easeIn);
+		Actuate.tween(this, 1.0, {curSize: 0})
+				.ease(luxe.tween.easing.Elastic.easeIn)
+				.onComplete(function() {
+					if (onCompleteCallback != null) {
+						onCompleteCallback();
+					}
+				});
 	}
 
-	function animateFillScreen() : IGenericActuator {
+	function animateFillScreen() {
 		isEditing = false; //hack?
 		curSize = endSize;
-		return Actuate.tween(this, 1.0, {curSize: Luxe.screen.width})
-				.ease(luxe.tween.easing.Quad.easeIn);
+		Actuate.tween(this, 1.0, {curSize: Luxe.screen.width})
+				.ease(luxe.tween.easing.Quad.easeIn)
+				.onComplete(function() {
+					if (onCompleteCallback != null) {
+						onCompleteCallback();
+					}
+				});
 	}
 
 	//TODO can't figure out how to return a two deep animation
@@ -241,12 +341,19 @@ class ActionButton extends Visual {
 		isEditing = false; //hack?
 		curSize = endSize;
 
+		var curMid = Luxe.camera.screen_point_to_world(Luxe.screen.mid);
+		Actuate.tween(pos, 0.6, {x:curMid.x, y:curMid.y});
 		Actuate.tween(this, 0.6, {curSize: (endSize * 1.5)})
-				.ease(luxe.tween.easing.Bounce.easeOut)
+				.ease(luxe.tween.easing.Quad.easeOut)
 				.onComplete(function() {
 					Actuate.tween(this, 0.2, {curSize: 0})
-							.delay(0.4)
-							.ease(luxe.tween.easing.Quad.easeIn);
+							.delay(1.0)
+							.ease(luxe.tween.easing.Quad.easeIn)
+							.onComplete(function() {
+								if (onCompleteCallback != null) {
+									onCompleteCallback();
+								}
+							});
 				});
 	}
 
@@ -272,6 +379,7 @@ class ActionButton extends Visual {
 
 		return {
 			type : "action",
+			name : this.name,
 			backgroundColor : backgroundColor.toJson(),
 			illustrationColor : illustrationColor.toJson(),
 			terrainPos : terrainPos,
@@ -321,7 +429,6 @@ class ActionButton extends Visual {
 
 		curSize = startSize;
 
-		//test stuff
 		color = backgroundColor;
 		//color children (w/ plenty of hacks)
 		for (c in this.children) {
@@ -330,6 +437,11 @@ class ActionButton extends Visual {
 				cast(c2, Visual).color = illustrationColor;
 			}
 		};
+
+		//change name hack (should do this on creation instead? make a new constructor with a json initializer obj like the library uses)
+		Luxe.scene.remove(this);
+		this.name = json.name;
+		Luxe.scene.add(this);
 
 		return this;
 	}
